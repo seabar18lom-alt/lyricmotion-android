@@ -81,7 +81,7 @@ public class MainActivity extends Activity {
     private long getDuration(){
         MediaMetadataRetriever r=new MediaMetadataRetriever();
         try{r.setDataSource(this,audioUri);String s=r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);return Long.parseLong(s);}
-        finally{r.release();}
+        finally{try{r.release();}catch(java.io.IOException ignored){}}
     }
     private Bitmap createFrame(String lyric,int color,int width,int height,Bitmap art,boolean emphasize){
         Bitmap bmp=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888);
