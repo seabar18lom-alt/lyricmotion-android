@@ -2,7 +2,7 @@
 *{box-sizing:border-box}body{margin:0;background:#0d1221;color:#f8f9fc;font-family:system-ui,sans-serif}header{padding:20px;background:#1b2440}h1{margin:0;font-size:23px}small{color:#a8b2d0}.wrap{padding:16px;max-width:780px;margin:auto}.panel{background:#1d2740;border:1px solid #36415d;border-radius:14px;padding:16px;margin:14px 0}label{display:block;margin:8px 0;color:#ced7eb}textarea,input,select,button{font:inherit}textarea{width:100%;height:155px;padding:10px;border-radius:8px;background:#0d172b;border:1px solid #4a5874;color:white}input[type=file]{width:100%;margin:8px 0}button,select{border:0;border-radius:8px;background:#4769e9;color:white;padding:10px;margin:4px 3px}button:active{filter:brightness(1.3)}audio{width:100%;margin:12px 0}.item{padding:9px 6px;border-bottom:1px solid #3d4762;display:flex;gap:8px;align-items:center}.item.active{background:#344a83}.item span{flex:1}.item input{width:75px;background:#101a30;border:1px solid #5c6d90;color:white;border-radius:5px;padding:6px}.preview{height:220px;display:grid;place-items:center;text-align:center;position:relative;overflow:hidden;border-radius:12px;background:#e48f9e;color:#151b2b;font-weight:900;font-size:26px}.preview img{max-height:88%;max-width:96%;position:absolute;opacity:.65}.preview b{z-index:1;text-shadow:0 2px 7px #fff}</style></head><body>
 <header><h1>LyricMotion</h1><small>가사 싱크 편집 · MV 미리보기 · MP4 제작</small></header><main class="wrap">
 <div class="panel"><label>음악 MP3 / WAV</label><input type="file" id="audiofile" accept="audio/*"><audio id="audio" controls></audio><label>일러스트 이미지</label><input type="file" id="imagefile" accept="image/*"></div>
-<div class="panel"><label>가사 원문 (한 줄에 한 구절)</label><textarea id="lyrics" placeholder="가사를 붙여넣으세요"></textarea><button id="make">가사 줄 만들기</button><button id="loadlrc">LRC 불러오기</button><input type="file" id="lrcfile" accept=".lrc,text/plain" hidden></div>
+<div class="panel"><label>가사 원문 (한 줄에 한 구절)</label><textarea id="lyrics" placeholder="가사를 붙여넣으세요"></textarea><button id="make">가사 줄 만들기</button><button id="loadlrc">LRC 불러오기</button><select id="aiLanguage"><option value="ja">일본어</option><option value="ko">한국어</option><option value="en">영어</option></select><button id="autoSync">AI 자동 싱크 (베타)</button><p id="aiStatus" style="color:#d0d9ff;font-size:13px">최초 분석 시 약 142MB의 무료 AI 모델을 다운로드합니다. Wi-Fi 권장.</p><input type="file" id="lrcfile" accept=".lrc,text/plain" hidden></div>
 <div class="panel"><label>MV 미리보기 · 배경 색상</label><select id="color"><option value="#e48f9e">코랄</option><option value="#256b78">청록</option><option value="#d8c9ed">연보라</option><option value="#e2e0cd">크림</option><option value="#dc433c">레드</option><option value="#141a2a">네이비</option></select><div class="preview" id="preview"><img id="art"><b id="current">가사를 불러오세요</b></div><small>v0.4: 휴대폰에서 MP4 렌더링을 시도할 수 있습니다. AI 자동 싱크는 아직 개발 중이므로 정확한 LRC 파일을 불러오거나 시간을 수정해 사용하세요.</small></div>
 <div class="panel"><label>가사 줄별 시작 시간 조절 (초)</label><div id="rows"></div><button id="saveLrc">LRC 저장</button><button id="saveSrt">SRT 저장</button><button id="saveProject">프로젝트 JSON</button><button id="exportMp4">MP4 영상 만들기</button><p id="exportState" style="color:#c4d2f8;font-size:13px">영상 내보내기 전 MP3와 LRC 싱크를 확인하세요.</p></div>
 </main><script>
@@ -19,4 +19,43 @@ $('saveSrt').onclick=()=>download('lyrics.srt','text/plain',rows.map((r,i)=>[i+1
 $('saveProject').onclick=()=>download('lyrics-project.json','application/json',JSON.stringify({rows,color:$('color').value},null,2));
 $('exportMp4').onclick=()=>{if(!rows.length){$('exportState').textContent='먼저 가사를 불러오세요';return;}if(!window.Android?.exportVideo){$('exportState').textContent='안드로이드 앱에서 사용해주세요';return;} $('exportMp4').disabled=true;$('exportState').textContent='준비 중...';Android.exportVideo(JSON.stringify(rows),$('color').value)};
 window.onNativeExport=(status,msg)=>{$('exportState').textContent=msg;if(status==='done'||status==='error'||status==='ready')$('exportMp4').disabled=false;};
+
+$('autoSync').onclick=()=>{
+ if(!rows.length){$('aiStatus').textContent='먼저 가사 줄을 만드세요';return;}
+ if(!window.Android?.autoSync){$('aiStatus').textContent='안드로이드 전용 기능입니다';return;}
+ $('autoSync').disabled=true;$('aiStatus').textContent='AI 분석 시작';Android.autoSync($('aiLanguage').value);
+};
+function assignDetectedTimestamps(segments) {
+ const valid=segments.filter(s=>typeof s.start==='number'&&typeof s.end==='number'&&s.end>s.start);
+ if(!valid.length)throw Error('음성 구간이 검출되지 않았습니다');
+ const norm=s=>String(s||'').normalize('NFKC').replace(/[\s。、，.!?！？「」『』（）()\-—]/g,'').toLowerCase();
+ const lengths=valid.map(s=>Math.max(1,norm(s.text).length));
+ const sum=lengths.reduce((a,b)=>a+b,0);
+ const lyricLengths=rows.map(r=>Math.max(1,norm(r.text).length));
+ const lyricSum=lyricLengths.reduce((a,b)=>a+b,0);
+ let cum=0;
+ rows.forEach((r,i)=>{
+   const fraction=cum/lyricSum*sum;
+   let a=0,j=0;
+   for(;j<valid.length-1;j++){if(a+lengths[j]>fraction)break;a+=lengths[j]}
+   const seg=valid[j];
+   r.start=Math.max(0,seg.start+(seg.end-seg.start)*Math.min(1,(fraction-a)/lengths[j]));
+   cum+=lyricLengths[i];
+ });
+ render();
+}
+const previousNativeCallback=window.onNativeExport;
+window.onNativeExport=(status,msg)=>{
+ if(status.startsWith('sync')){
+    if(status==='syncResult'){
+      try{let data=JSON.parse(msg);assignDetectedTimestamps(data);
+        $('aiStatus').textContent='AI 추정 완료: 실제 소리를 듣고 싱크를 검토하세요. 일본어 빠른 노래는 오차가 날 수 있어요.';}
+      catch(e){$('aiStatus').textContent='싱크 처리 오류: '+e.message}
+      $('autoSync').disabled=false;
+    }else if(status==='syncError'){$('aiStatus').textContent='AI 오류: '+msg;$('autoSync').disabled=false;}
+    else {$('aiStatus').textContent=msg;}
+    return;
+ }
+ if(previousNativeCallback)previousNativeCallback(status,msg);
+};
 </script></body></html>
