@@ -4,7 +4,7 @@ import android.media.*;
 import android.net.Uri;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.ArrayList;
+
 
 public final class AudioPcm {
     public static float[] decode16k(Context ctx, Uri input) throws Exception {
@@ -24,7 +24,10 @@ public final class AudioPcm {
             int sampleRate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
             codec=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));
             codec.configure(format,null,null,0);codec.start();
-            ArrayList<Float> original=new ArrayList<>();
+            float[] output=new float[16000*60];
+            int written=0;
+            long sourceIndex=0;
+            double nextSourcePosition=0;
             MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
             boolean inputDone=false, outputDone=false;
             while(!outputDone){
@@ -56,21 +59,24 @@ public final class AudioPcm {
                             for(int ch=0;ch<channels;ch++){
                                 sum += encoding==AudioFormat.ENCODING_PCM_FLOAT?buf.getFloat():buf.getShort()/32768f;
                             }
-                            original.add(sum/channels);
+                            float mono=sum/channels;
+                            // Resample during decoding; don't store millions of boxed Float objects.
+                            while(nextSourcePosition <= sourceIndex){
+                                if(written==output.length){
+                                    if(output.length>=16000*60*30)throw new Exception("음원이 30분 제한을 초과합니다");
+                                    output=java.util.Arrays.copyOf(output,Math.min(output.length*2,16000*60*30));
+                                }
+                                output[written++]=mono;
+                                nextSourcePosition+=sampleRate/16000.0;
+                            }
+                            sourceIndex++;
                         }
                     }
                     codec.releaseOutputBuffer(idx,false);
                     if((info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0)outputDone=true;
                 }
             }
-            int count=(int)Math.floor((double)original.size()*16000/sampleRate);
-            float[] result=new float[count];
-            for(int i=0;i<count;i++){
-                double pos=(double)i*sampleRate/16000;
-                int a=Math.min((int)pos,original.size()-1),b=Math.min(a+1,original.size()-1);
-                double t=pos-a;result[i]=(float)(original.get(a)*(1-t)+original.get(b)*t);
-            }
-            return result;
+            return java.util.Arrays.copyOf(output,written);
         } finally {
             if(codec!=null){try{codec.stop();}catch(Exception ignored){}codec.release();}
             extractor.release();
