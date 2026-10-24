@@ -17,8 +17,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
+      - name: Get native whisper source
+        run: git clone --depth 1 --branch v1.7.6 https://github.com/ggml-org/whisper.cpp.git whisper-src
       - name: Build debug APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: LyricMotion-debug-apk
