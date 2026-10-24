@@ -185,7 +185,46 @@ public class MainActivity extends Activity {
             transformer.start(composition,readyVideo.getAbsolutePath());
         }catch(Exception e){notifyWeb("error",e.getMessage());message("영상 제작 오류: "+e.getMessage());}
     }
+    private boolean syncing=false;
+    private void runOfflineSync(String language) {
+        if(syncing){notifyWeb("syncError","분석 중입니다");return;}
+        if(audioUri==null){notifyWeb("syncError","먼저 MP3 파일을 선택해줘");return;}
+        syncing=true;
+        notifyWeb("syncProgress","모델 확인 중 (최초 1회 약 142 MB 다운로드)");
+        new Thread(()->{
+            try{
+                File model=new File(getFilesDir(),"ggml-base.bin");
+                if(!model.exists() || model.length()<100000000){
+                    File tmp=new File(getFilesDir(),"ggml-base.bin.tmp");
+                    java.net.URL url=new java.net.URL("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
+                    java.net.HttpURLConnection conn=(java.net.HttpURLConnection)url.openConnection();
+                    conn.setConnectTimeout(20000);conn.setReadTimeout(45000);
+                    try(java.io.InputStream in=conn.getInputStream();java.io.FileOutputStream out=new java.io.FileOutputStream(tmp)){
+                        byte[] buf=new byte[65536];int n;long total=0;long last=-1;
+                        while((n=in.read(buf))!=-1){
+                            out.write(buf,0,n);total+=n;
+                            long mb=total/1048576;
+                            if(mb!=last && mb%10==0){last=mb;long progress=mb;runOnUiThread(()->notifyWeb("syncProgress","AI 모델 다운로드: "+progress+" MB"));}
+                        }
+                    }finally{conn.disconnect();}
+                    if(tmp.length()<100000000)throw new Exception("모델 다운로드가 불완전합니다");
+                    if(!tmp.renameTo(model))throw new Exception("모델 저장에 실패했습니다");
+                }
+                runOnUiThread(()->notifyWeb("syncProgress","MP3 음원 디코딩 중"));
+                float[] pcm=AudioPcm.decode16k(this,audioUri);
+                if(pcm.length<16000)throw new Exception("분석할 오디오가 너무 짧습니다");
+                runOnUiThread(()->notifyWeb("syncProgress","Whisper 음성 인식 중 (시간이 걸릴 수 있습니다)"));
+                String result=WhisperEngine.transcribe(model.getAbsolutePath(),pcm,language);
+                if(result.contains("\"error\""))throw new Exception(result);
+                runOnUiThread(()->notifyWeb("syncResult",result));
+            }catch(Throwable ex){
+                String msg=ex.getMessage()==null?ex.toString():ex.getMessage();
+                runOnUiThread(()->notifyWeb("syncError",msg));
+            }finally{syncing=false;}
+        }).start();
+    }
     public class Bridge {
+        @JavascriptInterface public void autoSync(String language){runOnUiThread(()->runOfflineSync(language));}
         @JavascriptInterface public void save(String filename,String mime,String value){runOnUiThread(()->{
             pendingText=value;Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);
             i.addCategory(Intent.CATEGORY_OPENABLE);i.setType(mime);i.putExtra(Intent.EXTRA_TITLE,filename);
